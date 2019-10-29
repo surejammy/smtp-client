@@ -1,0 +1,1 @@
+smtp-security=tls&smtp-auth=plain&smtp-flag=debug&smtp-server=mail.yunpiaoer.com&smtp-port=25&smtp-user=jammyxu@mail.yunpiaoer.com&smtp-pass=123456&smtp-from=jammyxu@mail.yunpiaoer.com

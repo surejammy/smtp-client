@@ -44,6 +44,7 @@
 #include <string.h>
 #include <stdlib.h>
 #include <time.h>
+#include <err.h>
 
 #ifdef SMTP_OPENSSL
 # include <openssl/bio.h>
@@ -1777,6 +1778,7 @@ static int
 smtp_tls_init(struct smtp *const smtp,
               const char *const server){
   X509 *X509_cert_peer;
+  int ret;
 
   /* Do not need to check the return value since this always returns 1. */
   SSL_library_init();
@@ -1786,6 +1788,7 @@ smtp_tls_init(struct smtp *const smtp,
   OpenSSL_add_all_algorithms();
 
   if((smtp->tls_ctx = SSL_CTX_new(SSLv23_client_method())) == NULL){
+      errx(1, "smtp_tls_init,SSL_CTX_new failed");
     return -1;
   }
 
@@ -1807,6 +1810,7 @@ smtp_tls_init(struct smtp *const smtp,
   if(smtp->cafile){
     if(SSL_CTX_load_verify_locations(smtp->tls_ctx, smtp->cafile, NULL) != 1){
       SSL_CTX_free(smtp->tls_ctx);
+      errx(1, "smtp_tls_init,SSL_CTX_load_verify_locations failed");
       return -1;
     }
   }
@@ -1814,32 +1818,38 @@ smtp_tls_init(struct smtp *const smtp,
     X509_STORE_set_default_paths(SSL_CTX_get_cert_store(smtp->tls_ctx));
     if(ERR_peek_error() != 0){
       SSL_CTX_free(smtp->tls_ctx);
+      errx(1, "smtp_tls_init,X509_STORE_set_default_paths failed");
       return -1;
     }
   }
 
   if((smtp->tls = SSL_new(smtp->tls_ctx)) == NULL){
     SSL_CTX_free(smtp->tls_ctx);
+    errx(1, "smtp_tls_init,SSL_new failed");
     return -1;
   }
 
   if((smtp->tls_bio = BIO_new_socket(smtp->sock, 0)) == NULL){
     SSL_CTX_free(smtp->tls_ctx);
     SSL_free(smtp->tls);
+    errx(1, "smtp_tls_init,BIO_new_socket failed");
     return -1;
   }
 
   SSL_set_bio(smtp->tls, smtp->tls_bio, smtp->tls_bio);
   SSL_set_connect_state(smtp->tls);
-  if(SSL_connect(smtp->tls) != 1){
+  ret = SSL_connect(smtp->tls);
+  if(ret != 1){
     SSL_CTX_free(smtp->tls_ctx);
     SSL_free(smtp->tls);
+    errx(1, "smtp_tls_init,SSL_connect failed,ret=%d", ret);
     return -1;
   }
 
   if(SSL_do_handshake(smtp->tls) != 1){
     SSL_CTX_free(smtp->tls_ctx);
     SSL_free(smtp->tls);
+    errx(1, "smtp_tls_init,SSL_do_handshake failed");
     return -1;
   }
 
@@ -1848,11 +1858,13 @@ smtp_tls_init(struct smtp *const smtp,
     if((X509_cert_peer = SSL_get_peer_certificate(smtp->tls)) == NULL){
       SSL_CTX_free(smtp->tls_ctx);
       SSL_free(smtp->tls);
+      errx(1, "smtp_tls_init,SSL_get_peer_certificate failed");
       return -1;
     }
     if(X509_check_host(X509_cert_peer, server, 0, 0, NULL) != 1){
       SSL_CTX_free(smtp->tls_ctx);
       SSL_free(smtp->tls);
+      errx(1, "smtp_tls_init,X509_check_host failed");
       return -1;
     }
     X509_free(X509_cert_peer);
@@ -2176,6 +2188,7 @@ smtp_initiate_handshake(struct smtp *const smtp,
 #ifdef SMTP_OPENSSL
   if(connection_security == SMTP_SECURITY_TLS){
     if(smtp_tls_init(smtp, server) < 0){
+      errx(1, "smtp_initiate_handshake, smtp_tls_init failed");
       return smtp_status_code_set(smtp, SMTP_STATUS_HANDSHAKE);
     }
   }
@@ -2185,11 +2198,13 @@ smtp_initiate_handshake(struct smtp *const smtp,
   /* Get initial 220 message - 5 minute timeout. */
   smtp_set_read_timeout(smtp, 60 * 5);
   if(smtp_getline(smtp) == STRING_GETDELIMFD_ERROR){
+      errx(1, "smtp_initiate_handshake, smtp_getline failed");
     return smtp->status_code;
   }
 
   /* (3) */
   if(smtp_ehlo(smtp) != SMTP_STATUS_OK){
+      errx(1, "smtp_initiate_handshake, smtp_ehlo failed");
     return smtp->status_code;
   }
 
@@ -2197,15 +2212,19 @@ smtp_initiate_handshake(struct smtp *const smtp,
 #ifdef SMTP_OPENSSL
   if(connection_security == SMTP_SECURITY_STARTTLS){
     if(smtp_puts(smtp, "STARTTLS\r\n") != SMTP_STATUS_OK){
+        errx(1, "smtp_initiate_handshake, smtp_puts failed");
       return smtp->status_code;
     }
     if(smtp_read_and_parse_code(smtp) != SMTP_READY){
+        errx(1, "smtp_initiate_handshake, smtp_read_and_parse_code failed");
       return smtp_status_code_set(smtp, SMTP_STATUS_HANDSHAKE);
     }
     if(smtp_tls_init(smtp, server) < 0){
+        errx(1, "smtp_initiate_handshake, smtp_tls_init failed");
       return smtp_status_code_set(smtp, SMTP_STATUS_HANDSHAKE);
     }
     if(smtp_ehlo(smtp) != SMTP_STATUS_OK){
+        errx(1, "smtp_initiate_handshake, smtp_ehlo failed");
       return smtp->status_code;
     }
   }
@@ -3001,6 +3020,7 @@ smtp_open(const char *const server,
 
   if((snew = calloc(1, sizeof(**smtp))) == NULL){
     *smtp = &g_smtp_error;
+    err(1, "smtp_open calloc null");
     return smtp_status_code_get(*smtp);
   }
   *smtp = snew;
@@ -3017,12 +3037,14 @@ smtp_open(const char *const server,
 #endif /* !(SMTP_IS_WINDOWS) */
 
   if(smtp_connect(snew, server, port) < 0){
+    err(1, "smtp_connect failed");
     return smtp_status_code_set(*smtp, SMTP_STATUS_CONNECT);
   }
 
   if(smtp_initiate_handshake(snew,
                              server,
                              connection_security) != SMTP_STATUS_OK){
+    err(1, "smtp_initiate_handshake failed");
     return smtp_status_code_set(*smtp, SMTP_STATUS_HANDSHAKE);
   }
 
@@ -3037,6 +3059,7 @@ smtp_auth(struct smtp *const smtp,
   int auth_rc;
 
   if(smtp->status_code != SMTP_STATUS_OK){
+    err(1, "smtp_auth failed");
     return smtp->status_code;
   }
 
@@ -3055,10 +3078,12 @@ smtp_auth(struct smtp *const smtp,
     auth_rc = 0;
   }
   else{
+    err(1, "auth_method[%d] invalid", auth_method);
     return smtp_status_code_set(smtp, SMTP_STATUS_PARAM);
   }
 
   if(auth_rc < 0){
+    err(1, "auth_rc[%d]", auth_rc);
     return smtp_status_code_set(smtp, SMTP_STATUS_AUTH);
   }
 
@@ -3178,6 +3203,7 @@ smtp_close(struct smtp *smtp){
   status_code = smtp->status_code;
 
   if(smtp->flags == SMTP_FLAG_INVALID_MEMORY){
+      err(1, "smtp_close, smtp->flags == SMTP_FLAG_INVALID_MEMORY");
     return status_code;
   }
 
@@ -3203,6 +3229,7 @@ smtp_close(struct smtp *smtp){
     if(close(smtp->sock) < 0){
       if(smtp->status_code == SMTP_STATUS_OK){
         smtp_status_code_set(smtp, SMTP_STATUS_CLOSE);
+        err(1, "smtp->status_code == SMTP_STATUS_OK");
       }
     }
 #endif /* SMTP_IS_WINDOWS */
@@ -3360,18 +3387,22 @@ smtp_address_add(struct smtp *const smtp,
   size_t num_address_inc;
 
   if(smtp->status_code != SMTP_STATUS_OK){
+      err(1, "smtp_address_add, status_code != SMTP_STATUS_OK");
     return smtp->status_code;
   }
 
   if(smtp_address_validate_email(email) < 0){
+      err(1, "smtp_address_add, smtp_address_validate_email failed,email[%s]", email);
     return smtp_status_code_set(smtp, SMTP_STATUS_PARAM);
   }
 
   if(name && smtp_address_validate_name(name) < 0){
+      err(1, "smtp_address_add, smtp_address_validate_name failed");
     return smtp_status_code_set(smtp, SMTP_STATUS_PARAM);
   }
 
   if(smtp_si_add_size_t(smtp->num_address, 1, &num_address_inc)){
+      err(1, "smtp_address_add, smtp_si_add_size_t failed");
     return smtp_status_code_set(smtp, SMTP_STATUS_NOMEM);
   }
 
@@ -3379,6 +3410,7 @@ smtp_address_add(struct smtp *const smtp,
                                        num_address_inc,
                                        sizeof(*new_address_list));
   if(new_address_list == NULL){
+      err(1, "smtp_address_add, smtp_reallocarray failed");
     return smtp_status_code_set(smtp, SMTP_STATUS_NOMEM);
   }
   new_address = &new_address_list[smtp->num_address];
@@ -3397,6 +3429,7 @@ smtp_address_add(struct smtp *const smtp,
      (new_address->name == NULL && name)){
     free(new_address->email);
     free(new_address->name);
+    err(1, "smtp_address_add, email or name null");
     return smtp_status_code_set(smtp, SMTP_STATUS_NOMEM);
   }
   smtp->num_address = num_address_inc;
@@ -3427,12 +3460,14 @@ smtp_attachment_add_path(struct smtp *const smtp,
   size_t bytes_read;
 
   if(smtp->status_code != SMTP_STATUS_OK){
+      err(1, "smtp_attachment_add_path, smtp->status_code != SMTP_STATUS_OK");
     return smtp->status_code;
   }
 
   errno = 0;
   if((data = smtp_file_get_contents(path, &bytes_read)) == NULL){
     if(errno == ENOMEM){
+        err(1, "smtp_attachment_add_path, smtp_file_get_contents == ENOMEM");
       return smtp_status_code_set(smtp, SMTP_STATUS_NOMEM);
     }
     return smtp_status_code_set(smtp, SMTP_STATUS_FILE);

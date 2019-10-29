@@ -24,8 +24,8 @@ CWARN += -Wcast-align
 CWARN += -Wcast-qual
 CWARN += -Wdeclaration-after-statement
 CWARN += -Wdisabled-optimization
-CWARN += -Wdouble-promotion
-CWARN += -Werror
+#CWARN += -Wdouble-promotion
+#CWARN += -Werror
 CWARN += -Wextra
 CWARN += -Wfatal-errors
 CWARN += -Wfloat-equal
@@ -40,7 +40,7 @@ CWARN += -Wmissing-declarations
 CWARN += -Wmissing-include-dirs
 CWARN += -Wmissing-prototypes
 CWARN += -Wnested-externs
-CWARN += -Wnull-dereference
+#CWARN += -Wnull-dereference
 CWARN += -Wold-style-definition
 CWARN += -Wpacked
 CWARN += -Wpedantic
@@ -61,16 +61,16 @@ CWARN += -Wvla
 CWARN += -Wwrite-strings
 
 CWARN.gcc += -Wno-aggressive-loop-optimizations
-CWARN.gcc += -Wduplicated-branches
-CWARN.gcc += -Wduplicated-cond
+#CWARN.gcc += -Wduplicated-branches
+#CWARN.gcc += -Wduplicated-cond
 CWARN.gcc += -Wjump-misses-init
 CWARN.gcc += -Wlogical-op
 CWARN.gcc += -Wnormalized=nfkc
-CWARN.gcc += -Wrestrict
+#CWARN.gcc += -Wrestrict
 CWARN.gcc += -Wstack-usage=5000
-CWARN.gcc += -Wshift-overflow=2
+#CWARN.gcc += -Wshift-overflow=2
 CWARN.gcc += -Wsync-nand
-CWARN.gcc += -Wstringop-overflow=4
+#CWARN.gcc += -Wstringop-overflow=4
 CWARN.gcc += -Wtrampolines
 ##CWARN.gcc += -Wunsafe-loop-optimizations
 CWARN.gcc += -Wunsuffixed-float-constants
@@ -133,6 +133,7 @@ VALGRIND_MEMCHECK = $(SILENT) valgrind $(VFLAGS) $(VFLAGS_MEMCHECK)
 GCOV = gcov -b $(BDIR)/debug/smtp.o
 
 CC  = gcc
+#CC  = g++
 CPP = g++
 
 CC.clang = clang
@@ -165,7 +166,8 @@ all: $(BDIR)/debug/libsmtp.a          \
      $(BDIR)/release/test_nossl
 
 clean:
-	$(SILENT) rm -rf $(BDIR)
+	$(SILENT) rm -rf $(BDIR)/debug/*.a
+	$(SILENT) rm -rf $(BDIR)/release/*.a
 
 doc $(BDIR)/doc/html/index.html: src/mailx.c               \
                                  src/SMTPMail.h            \
@@ -280,7 +282,7 @@ $(BDIR)/debug/seams.o: test/seams.c | $(BDIR)/debug
 $(BDIR)/debug/clang_test: $(BDIR)/debug/clang_seams.o \
                           $(BDIR)/debug/clang_smtp.o  \
                           $(BDIR)/debug/clang_test.o
-	$(LINK.c.clang) -lssl -lcrypto -lgcov -lubsan
+	$(LINK.c.clang) -lssl -lcrypto -lgcov 
 
 $(BDIR)/debug/clang_seams.o: test/seams.c | $(BDIR)/debug
 	$(COMPILE.c.clang) $(CDEF_POSIX)

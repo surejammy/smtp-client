@@ -21,7 +21,6 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
-
 #include "smtp.h"
 
 /**
@@ -166,7 +165,7 @@ smtp_ffile_get_contents(FILE *stream,
 
   do{
     size_t bytes_read_loop;
-    if((new_buf = realloc(read_buf, bufsz + BUFSZ_INCREMENT)) == NULL){
+    if((new_buf = (char*)realloc(read_buf, bufsz + BUFSZ_INCREMENT)) == NULL){
       free(read_buf);
       return NULL;
     }
@@ -318,6 +317,7 @@ mailx_append_attachment_arg(struct mailx *const mailx,
   free(attach_arg_dup);
 }
 
+#if 0
 /**
  * Parses the -S option which contains a key/value pair separated by an '='
  * character.
@@ -427,6 +427,146 @@ mailx_parse_smtp_option(struct mailx *const mailx,
     errx(1, "invalid argument: %s", option);
   }
 }
+#endif
+
+/**
+ * Parses the -S option which contains a key/value pair separated by an '='
+ * character.
+ *
+ * @param[in] mailx  Store the results of the option parsing into the relevant
+ *                   field in this mailx context.
+ * @param[in] option String containing key/value option to parse.
+ */
+static void
+mailx_parse_smtp_option(struct mailx *const mailx,
+                        const char *const option){
+
+  int rc = 0;
+
+  char* token = NULL;
+  char* src = NULL;
+  char* saveptr_outer = NULL;
+  char* saveptr_inner = NULL;
+  if((src = strdup(option)) == NULL){
+    err(1, "strdup: option: %s", option);
+    return;
+  }
+
+  token = strtok_r(src, "&", &saveptr_outer);
+
+  while( token != NULL ) {
+
+
+    char* optdup = NULL;
+    char* opt_key = NULL;
+    char* opt_value = NULL;
+
+    printf("to sep: %s\n", token);
+
+
+    if((optdup = strdup(token)) == NULL){
+        err(1, "strdup: option: %s,strdup null", token);
+    }
+
+    if((opt_key = strtok_r(optdup, "=", &saveptr_inner)) == NULL){
+        errx(1, "strtok: %s,= not found", optdup);
+    }
+
+    opt_value = strtok_r(NULL, "=", &saveptr_inner);
+
+    if(strcmp(opt_key, "smtp-security") == 0){
+        if(strcmp(opt_value, "none") == 0){
+            mailx->connection_security = SMTP_SECURITY_NONE;
+        }
+    #ifdef SMTP_OPENSSL
+        else if(strcmp(opt_value, "tls") == 0){
+            mailx->connection_security = SMTP_SECURITY_TLS;
+        }
+        else if(strcmp(opt_value, "starttls") == 0){
+            mailx->connection_security = SMTP_SECURITY_STARTTLS;
+        }
+    #endif /* SMTP_OPENSSL */
+        else{
+            rc = -1;
+            err(1, "invalid smtp-security value,not **tls** nor **starttls**");
+        }
+    }
+    else if(strcmp(opt_key, "smtp-auth") == 0){
+        if(strcmp(opt_value, "none") == 0){
+            mailx->auth_method = SMTP_AUTH_NONE;
+        }
+        else if(strcmp(opt_value, "plain") == 0){
+            mailx->auth_method = SMTP_AUTH_PLAIN;
+        }
+        else if(strcmp(opt_value, "login") == 0){
+            mailx->auth_method = SMTP_AUTH_LOGIN;
+        }
+    #ifdef SMTP_OPENSSL
+        else if(strcmp(opt_value, "cram-md5") == 0){
+            mailx->auth_method = SMTP_AUTH_CRAM_MD5;
+        }
+    #endif /* SMTP_OPENSSL */
+        else{
+            rc = -1;
+            err(1, "invalid smtp-security value,not **none** nor **plain** nor **login**");
+        }
+    }
+    else if(strcmp(opt_key, "smtp-flag") == 0){
+        if(strcmp(opt_value, "debug") == 0){
+            mailx->smtp_flags |= SMTP_DEBUG;
+        }
+        else if(strcmp(opt_value, "no-cert-verify") == 0){
+            mailx->smtp_flags |= SMTP_NO_CERT_VERIFY;
+        }
+        else{
+            rc = -1;
+            err(1, "invalid smtp-flag value,not **debug** nor **no-cert-verify**");
+        }
+    }
+    else if(strcmp(opt_key, "smtp-server") == 0){
+        if((mailx->server = strdup(opt_value)) == NULL){
+            err(1, "smtp-server strdup null");
+        }
+    }
+    else if(strcmp(opt_key, "smtp-port") == 0){
+        if((mailx->port = strdup(opt_value)) == NULL){
+            err(1, "smtp-port strdup null");
+        }
+    }
+    else if(strcmp(opt_key, "smtp-user") == 0){
+        if((mailx->user = strdup(opt_value)) == NULL){
+            err(1, "smtp-user strdup null");
+        }
+    }
+    else if(strcmp(opt_key, "smtp-pass") == 0){
+        if((mailx->pass = strdup(opt_value)) == NULL){
+            err(1, "smtp-pass strdup null");
+        }
+    }
+    else if(strcmp(opt_key, "smtp-from") == 0){
+        if((mailx->from = strdup(opt_value)) == NULL){
+            err(1, "smtp-from strdup null");
+        }
+    }
+    else{
+        rc = -1;
+        err(1, "invalid option,%s", opt_key);
+    }
+
+    free(optdup);
+    optdup = NULL;
+
+    if(rc < 0){
+        errx(1, "invalid argument: %s", option);
+    }
+
+    /*获取下一个token*/
+    token = strtok_r(NULL,"&", &saveptr_outer);
+  }
+
+  printf("mailx_parse_smtp_option success\n");
+  return;
+}
 
 /**
  * Initialize and set the default options in the mailx context.
@@ -499,26 +639,49 @@ int main(int argc, char *argv[]){
   int rc;
   int i;
   struct mailx mailx;
-
+  FILE* fp = NULL;
+  char options[1024] = {0x0}; 
+  size_t len = 0;
   mailx_init_default_values(&mailx);
 
   while((rc = getopt(argc, argv, "a:s:S:")) != -1){
     switch(rc){
+    /*-a: 附件*/
     case 'a':
       mailx_append_attachment_arg(&mailx, optarg);
       break;
+    /*-s: subject */   
     case 's':
       mailx.subject = optarg;
       break;
-    case 'S':
+    /*-S: smtp选项  */
+    /*case 'S':
       mailx_parse_smtp_option(&mailx, optarg);
       break;
+    */  
     default:
       return 1;
     }
   }
   argc -= optind;
   argv += optind;
+
+  /*综上, mailx -a attach -s subject -S smtp_opt dest_addr1 dest_addr2 dest_addr3 */
+  fp = fopen("./smtp_opt.txt","r");
+  if(NULL == fp)
+  {
+     err(1, "fopen ./smtp_opt.txt failed");
+     return -1;
+  }
+
+  fgets(options, sizeof(options), fp);
+  printf("options is:%s\n", options);
+
+  len = strlen(options);
+  if (options[len - 1] == '\n') {
+      options[len - 1] = '\0';
+  }
+  mailx_parse_smtp_option(&mailx, options);
 
   if(argc < 1){
     errx(1, "must provide at least one email destination address");
@@ -540,10 +703,16 @@ int main(int argc, char *argv[]){
     }
   }
 
+
+  
+
+  /*
   puts("Reading email body from stdin");
   if((mailx.body = smtp_ffile_get_contents(stdin, NULL)) == NULL){
     err(1, "failed to read email body from stdin");
   }
+  */
+  mailx.body = strdup("test mail");
 
   mailx_address_append(&mailx, SMTP_ADDRESS_FROM, mailx.from);
 
@@ -553,6 +722,8 @@ int main(int argc, char *argv[]){
 
   mailx_send(&mailx);
   mailx_free(&mailx);
+
+  fclose(fp);
   return 0;
 }
 
